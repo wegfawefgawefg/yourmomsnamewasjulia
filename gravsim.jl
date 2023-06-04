@@ -142,7 +142,7 @@ function draw(renderer)
     
     # draw bodies
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255)
-    for i = 1:NUM_BODIES 
+    Threads.@threads for i = 1:NUM_BODIES 
         @inbounds body = bodies[i]
         x = Int(floor(body.x))
         y = Int(floor(body.y))

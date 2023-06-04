@@ -5,25 +5,26 @@ using Dates
 using CUDA
 
 DIMS = [800, 800]
+DIMS_GPU = CuArray{Float16, 1}(DIMS)
 
-FRAMES_PER_SECOND = 120;
+FRAMES_PER_SECOND = 60;
 TIMESTEP = 1.0 / FRAMES_PER_SECOND;
 
-NUM_BODIES = 10000
+NUM_BODIES = 8_000_000
 BODY_WIDTH = 1
 INITIAL_VEL_RANGE = 20.0
 
-G = 0.1
+G = Float16(0.1)
 
-pos = Array{Float32, 2}(undef, NUM_BODIES, 2)
-vel = Array{Float32, 2}(undef, NUM_BODIES, 2)
+pos = CuArray{Float16, 2}(undef, NUM_BODIES, 2)
+vel = CuArray{Float16, 2}(undef, NUM_BODIES, 2)
 
 function init_state()
     center = DIMS ./ 2.0
     window_size = DIMS ./ 4.0
     
-    for i = 1:NUM_BODIES
-        pos[i, :] = (rand(Float32, 2) .- 0.5) .* window_size .+ center
+    Threads.@threads for i = 1:NUM_BODIES
+        pos[i, :] = (rand(Float16, 2) .- 0.5) .* window_size .+ center
         vel[i, :] = pos[i, :] ./ 100.0
     end
 end
@@ -97,10 +98,11 @@ function semi_clear(renderer)
 end
 
 function step()
-    center = DIMS ./ 2.0
+    # center = CuArray{Float16, 2}(DIMS ./ 2.0)
+    center = DIMS_GPU ./ 2.0
 
     dp = pos .- reshape(center, (1, 2))
-    d = sqrt.(sum(dp .^ 2, dims=2))
+    d = sqrt.(sum(dp .^ 2, dims=2)) .+ 0.0001
 
     f = -G .* dp ./ d
 
@@ -117,16 +119,31 @@ function draw(renderer)
     rect_ref = Ref(SDL_Rect(center_x, center_y, BODY_WIDTH, BODY_WIDTH))
     SDL_RenderFillRect(renderer, rect_ref)
     
+    # copy the bodies back to cpu
+    pos_cpu = Array(pos)
+
     # draw bodies
+    # SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255)
+    # for i = 1:NUM_BODIES 
+    #     @inbounds p = pos_cpu[i, :]
+    #     x = Int(floor(p[1]))
+    #     y = Int(floor(p[2]))
+    #     SDL_RenderDrawPoint(renderer, x, y)
+    #     # rect_ref = Ref(SDL_Rect(x, y, BODY_WIDTH, BODY_WIDTH))
+    #     # SDL_RenderFillRect(renderer, rect_ref)
+    # end
+
+    # batch draw bodies
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255)
-    for i = 1:NUM_BODIES 
-        @inbounds p = pos[i, :]
+    
+    points = Vector{SDL_Point}(undef, NUM_BODIES)
+    Threads.@threads for i = 1:NUM_BODIES 
+        @inbounds p = pos_cpu[i, :]
         x = Int(floor(p[1]))
         y = Int(floor(p[2]))
-        SDL_RenderDrawPoint(renderer, x, y)
-        # rect_ref = Ref(SDL_Rect(x, y, BODY_WIDTH, BODY_WIDTH))
-        # SDL_RenderFillRect(renderer, rect_ref)
+        points[i] = SDL_Point(x, y)
     end
+    SDL_RenderDrawPoints(renderer, points, NUM_BODIES)
 
 end
 
